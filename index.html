@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マークシート＆弱点分析アプリ</title>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* スクロールバーのカスタマイズ */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        body { background-color: #f8fafc; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // アイコンコンポーネント
+        const Icon = ({ name, size = 24, className = "" }) => {
+            const svgRef = React.useRef(null);
+            useEffect(() => {
+                if (svgRef.current && window.lucide) {
+                    window.lucide.createIcons({
+                        icons: { [name]: window.lucide.icons[name] },
+                        nameAttr: 'data-lucide',
+                        root: svgRef.current.parentElement
+                    });
+                }
+            }, [name]);
+            return <i ref={svgRef} data-lucide={name} width={size} height={size} className={className}></i>;
+        };
+
+        // カスタムドットボタン
+        const DotButton = ({ value, checked, onChange, label, activeClass }) => (
+            <label className={`cursor-pointer w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-full border-2 transition-all select-none ${checked ? activeClass : 'border-gray-300 text-gray-400 hover:border-gray-400 bg-white'}`}>
+                <input 
+                    type="radio" 
+                    className="hidden" 
+                    value={value} 
+                    checked={checked} 
+                    onChange={onChange} 
+                />
+                <span className="font-bold text-sm sm:text-base">{label}</span>
+            </label>
+        );
+
+        function App() {
+            // ステート管理
+            const [view, setView] = useState('setup'); // 'setup', 'test', 'analysis'
+            const [setName, setSetName] = useState('');
+            const [answers, setAnswers] = useState({});
+            const [scores, setScores] = useState({});
+            const [history, setHistory] = useState([]);
+            const [errorMsg, setErrorMsg] = useState('');
+            const [showConfirm, setShowConfirm] = useState(false);
+
+            const totalQuestions = 100;
+            const questionNumbers = Array.from({ length: totalQuestions }, (_, i) => i + 1);
+
+            // ローカルストレージからの読み込み（初回のみ）
+            useEffect(() => {
+                const savedHistory = localStorage.getItem('study_history');
+                if (savedHistory) {
+                    setHistory(JSON.parse(savedHistory));
+                }
+
+                const savedSession = localStorage.getItem('study_current_session');
+                if (savedSession) {
+                    const parsed = JSON.parse(savedSession);
+                    if (parsed.setName) {
+                        setSetName(parsed.setName);
+                        setAnswers(parsed.answers || {});
+                        setScores(parsed.scores || {});
+                        setView('test');
+                    }
+                }
+            }, []);
+
+            // オートセーブ（入力が変わるたびに保存）
+            useEffect(() => {
+                if (view === 'test') {
+                    localStorage.setItem('study_current_session', JSON.stringify({
+                        setName,
+                        answers,
+                        scores
+                    }));
+                }
+            }, [setName, answers, scores, view]);
+
+            // 開始処理
+            const handleStart = () => {
+                if (!setName.trim()) {
+                    setErrorMsg('問題セット名（例：3-20）を入力してください。');
+                    return;
+                }
+                setErrorMsg('');
+                setView('test');
+            };
+
+            // 履歴リセット処理（テスト用）
+            const handleClearHistory = () => {
+                if(confirm('本当に履歴を全て削除しますか？')){
+                    setHistory([]);
+                    localStorage.removeItem('study_history');
+                }
+            };
+
+            // 記録して終了する処理
+            const handleFinish = () => {
+                setShowConfirm(true);
+            };
+
+            const confirmFinish = () => {
+                // 履歴に保存（未採点のものは除外）
+                const newRecords = [];
+                const timestamp = new Date().toISOString();
+
+                Object.keys(scores).forEach(qNum => {
+                    const score = scores[qNum];
+                    if (score === 'correct' || score === 'incorrect') {
+                        newRecords.push({
+                            id: `${Date.now()}-${qNum}`,
+                            setName: setName,
+                            questionNum: parseInt(qNum, 10),
+                            answer: answers[qNum], // 回答内容も一応残す
+                            score: score,
+                            timestamp: timestamp
+                        });
+                    }
+                });
+
+                const updatedHistory = [...history, ...newRecords];
+                setHistory(updatedHistory);
+                localStorage.setItem('study_history', JSON.stringify(updatedHistory));
+
+                // 現在のセッションをクリア
+                setSetName('');
+                setAnswers({});
+                setScores({});
+                localStorage.removeItem('study_current_session');
+                
+                setShowConfirm(false);
+                setView('analysis');
+            };
+
+            // 分析データの集計
+            const getRankedData = () => {
+                const aggregated = {};
+                history.forEach(record => {
+                    const key = `${record.setName} - 第${record.questionNum}問`;
+                    if (!aggregated[key]) {
+                        aggregated[key] = { name: key, correct: 0, incorrect: 0, setName: record.setName, qNum: record.questionNum };
+                    }
+                    if (record.score === 'correct') aggregated[key].correct++;
+                    if (record.score === 'incorrect') aggregated[key].incorrect++;
+                });
+
+                return Object.values(aggregated)
+                    .filter(d => d.incorrect > 0) // バツが1回以上あるものを対象
+                    .sort((a, b) => b.incorrect - a.incorrect); // バツが多い順
+            };
+
+            // ヘッダーナビゲーション
+            const NavButton = ({ targetView, icon, label, current }) => (
+                <button 
+                    onClick={() => setView(targetView)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-colors ${current ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-200'}`}
+                >
+                    <Icon name={icon} size={18} />
+                    <span className="hidden sm:inline">{label}</span>
+                </button>
+            );
+
+            return (
+                <div className="min-h-screen flex flex-col max-w-4xl mx-auto bg-white shadow-xl">
+                    {/* ヘッダー */}
+                    <header className="bg-white border-b sticky top-0 z-20 px-4 py-3 flex justify-between items-center shadow-sm">
+                        <div className="flex items-center gap-2">
+                            <div className="bg-blue-600 text-white p-2 rounded-lg">
+                                <Icon name="BookOpen" size={24} />
+                            </div>
+                            <h1 className="font-extrabold text-xl text-gray-800">
+                                {view === 'test' ? `回答中: ${setName}` : '弱点分析アプリ'}
+                            </h1>
+                        </div>
+                        <nav className="flex gap-2">
+                            <NavButton targetView="setup" icon="Play" label="テスト開始" current={view === 'setup' || view === 'test'} />
+                            <NavButton targetView="analysis" icon="BarChart2" label="弱点分析" current={view === 'analysis'} />
+                        </nav>
+                    </header>
+
+                    {/* メインコンテンツ */}
+                    <main className="flex-1 p-4 sm:p-6 overflow-hidden flex flex-col">
+                        
+                        {/* セットアップ画面 */}
+                        {view === 'setup' && (
+                            <div className="flex-1 flex flex-col items-center justify-center max-w-md mx-auto w-full">
+                                <div className="bg-slate-50 p-8 rounded-2xl border w-full">
+                                    <h2 className="text-2xl font-bold mb-6 text-center text-gray-800">新しい問題セット</h2>
+                                    
+                                    <div className="mb-6">
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">
+                                            問題集の回数・番号を入力
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="例：3-20" 
+                                            className="w-full text-xl p-4 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition-all outline-none"
+                                            value={setName}
+                                            onChange={(e) => setSetName(e.target.value)}
+                                            onKeyPress={(e) => e.key === 'Enter' && handleStart()}
+                                        />
+                                        {errorMsg && <p className="text-red-500 font-bold mt-2 text-sm">{errorMsg}</p>}
+                                        <p className="text-gray-500 text-sm mt-2">問題数は100問固定です。</p>
+                                    </div>
+
+                                    <button 
+                                        onClick={handleStart}
+                                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl text-lg flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95"
+                                    >
+                                        <Icon name="Play" size={24} />
+                                        100問スタート
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 回答・採点画面 */}
+                        {view === 'test' && (
+                            <div className="flex-1 flex flex-col">
+                                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
+                                    <Icon name="Info" size={18} />
+                                    <span>ブラウザを閉じても自動的に保存されます。採点していない問題は履歴に含まれません。</span>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto pr-2 pb-24">
+                                    <div className="space-y-3">
+                                        {questionNumbers.map(num => (
+                                            <div key={num} className="bg-white border rounded-xl p-3 sm:p-4 flex flex-col sm:flex-row items-center gap-4 hover:shadow-md transition-shadow">
+                                                
+                                                <div className="flex items-center gap-4 w-full sm:w-auto">
+                                                    <span className="font-bold text-gray-500 w-8 text-right text-lg">Q{num}.</span>
+                                                    
+                                                    {/* 回答ボタン (1~4) */}
+                                                    <div className="flex gap-2 flex-1 justify-center sm:justify-start">
+                                                        {[1, 2, 3, 4].map(val => (
+                                                            <DotButton 
+                                                                key={`ans-${num}-${val}`}
+                                                                value={val}
+                                                                checked={answers[num] === val}
+                                                                onChange={() => setAnswers({...answers, [num]: val})}
+                                                                label={val}
+                                                                activeClass="bg-blue-600 border-blue-600 text-white shadow-inner"
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                <div className="hidden sm:block w-px h-10 bg-gray-200 mx-2"></div>
+                                                <div className="w-full sm:hidden h-px bg-gray-100 my-1"></div>
+
+                                                {/* 採点ボタン (○ / ×) */}
+                                                <div className="flex gap-3 justify-center w-full sm:w-auto">
+                                                    <DotButton 
+                                                        value="correct"
+                                                        checked={scores[num] === 'correct'}
+                                                        onChange={() => setScores({...scores, [num]: 'correct'})}
+                                                        label="○"
+                                                        activeClass="bg-emerald-500 border-emerald-500 text-white shadow-inner"
+                                                    />
+                                                    <DotButton 
+                                                        value="incorrect"
+                                                        checked={scores[num] === 'incorrect'}
+                                                        onChange={() => setScores({...scores, [num]: 'incorrect'})}
+                                                        label="×"
+                                                        activeClass="bg-rose-500 border-rose-500 text-white shadow-inner"
+                                                    />
+                                                    {/* クリアボタン */}
+                                                    {(scores[num] || answers[num]) && (
+                                                        <button 
+                                                            onClick={() => {
+                                                                const newA = {...answers}; delete newA[num]; setAnswers(newA);
+                                                                const newS = {...scores}; delete newS[num]; setScores(newS);
+                                                            }}
+                                                            className="text-gray-400 hover:text-gray-600 p-2"
+                                                            title="クリア"
+                                                        >
+                                                            <Icon name="RotateCcw" size={20} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* フローティングアクションバー */}
+                                <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] flex justify-center z-10">
+                                    <div className="max-w-4xl w-full flex justify-end gap-4">
+                                        <button 
+                                            onClick={() => setView('setup')}
+                                            className="px-6 py-3 font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl"
+                                        >
+                                            中断する
+                                        </button>
+                                        <button 
+                                            onClick={handleFinish}
+                                            className="px-8 py-3 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-lg flex items-center gap-2"
+                                        >
+                                            <Icon name="Save" size={20} />
+                                            記録して終了
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 分析画面 */}
+                        {view === 'analysis' && (
+                            <div className="flex-1 flex flex-col">
+                                <div className="flex justify-between items-end mb-6">
+                                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                        <Icon name="TrendingDown" size={28} className="text-rose-500" />
+                                        累計誤答数 ワーストランキング
+                                    </h2>
+                                    {history.length > 0 && (
+                                        <button onClick={handleClearHistory} className="text-sm text-gray-500 hover:text-red-500 flex items-center gap-1">
+                                            <Icon name="Trash2" size={16} /> 履歴をリセット
+                                        </button>
+                                    )}
+                                </div>
+
+                                {history.length === 0 ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-gray-400 pb-20">
+                                        <Icon name="Inbox" size={64} className="mb-4 opacity-50" />
+                                        <p className="text-lg">まだ記録がありません。</p>
+                                        <button onClick={() => setView('setup')} className="mt-4 text-blue-500 font-bold hover:underline">
+                                            テストを始める
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
+                                        <table className="w-full text-left border-collapse">
+                                            <thead>
+                                                <tr className="bg-gray-50 border-b text-gray-600 text-sm">
+                                                    <th className="p-4 font-bold w-16 text-center">順位</th>
+                                                    <th className="p-4 font-bold">問題番号</th>
+                                                    <th className="p-4 font-bold text-center w-24">不正解(×)</th>
+                                                    <th className="p-4 font-bold text-center w-24">正解(○)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {getRankedData().map((item, index) => (
+                                                    <tr key={item.name} className="border-b last:border-b-0 hover:bg-gray-50 transition-colors">
+                                                        <td className="p-4 text-center">
+                                                            <span className={`font-black text-lg ${index === 0 ? 'text-amber-500' : index === 1 ? 'text-slate-400' : index === 2 ? 'text-amber-700' : 'text-gray-400'}`}>
+                                                                {index + 1}
+                                                            </span>
+                                                        </td>
+                                                        <td className="p-4 font-bold text-gray-800 text-lg">
+                                                            {item.name}
+                                                        </td>
+                                                        <td className="p-4 text-center">
+                                                            <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-rose-100 text-rose-600 font-bold text-lg">
+                                                                {item.incorrect}
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-4 text-center">
+                                                            <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 font-bold text-lg">
+                                                                {item.correct}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {getRankedData().length === 0 && (
+                                                    <tr>
+                                                        <td colSpan="4" className="p-8 text-center text-gray-500">
+                                                            素晴らしい！不正解(×)の記録はありません。
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </main>
+
+                    {/* 確認モーダル */}
+                    {showConfirm && (
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                            <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl transform transition-all">
+                                <h3 className="text-xl font-bold mb-2">採点を終了しますか？</h3>
+                                <p className="text-gray-600 mb-6">
+                                    未採点（○×がついていない）の問題は記録されません。よろしいですか？
+                                </p>
+                                <div className="flex gap-3">
+                                    <button 
+                                        onClick={() => setShowConfirm(false)}
+                                        className="flex-1 py-3 font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl"
+                                    >
+                                        戻る
+                                    </button>
+                                    <button 
+                                        onClick={confirmFinish}
+                                        className="flex-1 py-3 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl"
+                                    >
+                                        記録する
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
