@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学習記録・自動採点アプリ</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        body { background-color: #f8fafc; font-family: sans-serif; }
+        .answer-btn { flex: 1; height: 64px; font-size: 1.5rem; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const svgRef = React.useRef(null);
+            useEffect(() => {
+                if (svgRef.current && window.lucide) {
+                    window.lucide.createIcons({
+                        icons: { [name]: window.lucide.icons[name] },
+                        nameAttr: 'data-lucide',
+                        root: svgRef.current.parentElement
+                    });
+                }
+            }, [name]);
+            return <i ref={svgRef} data-lucide={name} width={size} height={size} className={className}></i>;
+        };
+
+        function App() {
+            // ステート
+            const [view, setView] = useState('setup'); // 'setup', 'test', 'analysis'
+            const [setName, setSetName] = useState('');
+            const [answers, setAnswers] = useState({});
+            const [scores, setScores] = useState({});
+            const [notes, setNotes] = useState({});
+            const [correctAnswers, setCorrectAnswers] = useState({}); // 正解辞書: { "3-20-1": 2 }
+            const [history, setHistory] = useState([]);
+            const [filterSetName, setFilterSetName] = useState('');
+            const [isRetesting, setIsRetesting] = useState(false);
+            const [retestQuestions, setRetestQuestions] = useState([]);
+
+            const totalQuestions = 100;
+
+            // 初期読み込み
+            useEffect(() => {
+                const savedHistory = localStorage.getItem('study_v2_history');
+                const savedDict = localStorage.getItem('study_v2_dict');
+                if (savedHistory) setHistory(JSON.parse(savedHistory));
+                if (savedDict) setCorrectAnswers(JSON.parse(savedDict));
+
+                const savedSession = localStorage.getItem('study_v2_current');
+                if (savedSession) {
+                    const parsed = JSON.parse(savedSession);
+                    setSetName(parsed.setName || '');
+                    setAnswers(parsed.answers || {});
+                    setScores(parsed.scores || {});
+                    setNotes(parsed.notes || {});
+                    if (parsed.view === 'test') setView('test');
+                }
+            }, []);
+
+            // オートセーブ
+            useEffect(() => {
+                if (view === 'test') {
+                    localStorage.setItem('study_v2_current', JSON.stringify({ setName, answers, scores, notes, view }));
+                }
+                localStorage.setItem('study_v2_dict', JSON.stringify(correctAnswers));
+            }, [setName, answers, scores, notes, view, correctAnswers]);
+
+            // テスト開始
+            const startTest = (name, questions = null) => {
+                if (!name.trim()) return alert('セット名を入力してください');
+                setSetName(name);
+                if (questions) {
+                    setRetestQuestions(questions);
+                    setIsRetesting(true);
+                } else {
+                    setIsRetesting(false);
+                    setRetestQuestions([]);
+                }
+                setView('test');
+            };
+
+            // 採点ロジック
+            const handleScore = (qNum, status) => {
+                const currentAnswer = answers[qNum];
+                if (!currentAnswer && status === 'correct') {
+                    alert('回答(1-4)を先に選んでください');
+                    return;
+                }
+
+                setScores(prev => ({ ...prev, [qNum]: status }));
+
+                // 正解を記憶（案A: 正解ならその回答、不正解ならプロンプト）
+                const dictKey = `${setName}-${qNum}`;
+                if (status === 'correct') {
+                    setCorrectAnswers(prev => ({ ...prev, [dictKey]: currentAnswer }));
+                } else if (status === 'incorrect' && !correctAnswers[dictKey]) {
+                    const realAns = prompt(`Q${qNum} の正しい答え(1-4)を入力してください。次回から自動採点されます。`, "");
+                    if (realAns && [1, 2, 3, 4].includes(Number(realAns))) {
+                        setCorrectAnswers(prev => ({ ...prev, [dictKey]: Number(realAns) }));
+                    }
+                }
+            };
+
+            // 回答選択時の自動採点チェック
+            const handleAnswerSelect = (qNum, val) => {
+                setAnswers(prev => ({ ...prev, [qNum]: val }));
+                const dictKey = `${setName}-${qNum}`;
+                if (correctAnswers[dictKey]) {
+                    const isCorrect = correctAnswers[dictKey] === val;
+                    setScores(prev => ({ ...prev, [qNum]: isCorrect ? 'correct' : 'incorrect' }));
+                }
+            };
+
+            // 終了処理
+            const finishTest = () => {
+                const timestamp = new Date().toISOString();
+                const newRecords = [];
+                Object.keys(scores).forEach(qNum => {
+                    newRecords.push({
+                        id: Date.now() + Math.random(),
+                        setName,
+                        qNum: parseInt(qNum),
+                        score: scores[qNum],
+                        timestamp
+                    });
+                });
+
+                const updatedHistory = [...history, ...newRecords];
+                setHistory(updatedHistory);
+                localStorage.setItem('study_v2_history', JSON.stringify(updatedHistory));
+                
+                // セッションクリア
+                setAnswers({}); setScores({}); setNotes({}); setSetName('');
+                localStorage.removeItem('study_v2_current');
+                setView('analysis');
+            };
+
+            // 履歴のフィルタリングと集計
+            const filteredData = useMemo(() => {
+                const aggregated = {};
+                history.forEach(r => {
+                    if (filterSetName && r.setName !== filterSetName) return;
+                    const key = `${r.setName}-${r.qNum}`;
+                    if (!aggregated[key]) aggregated[key] = { setName: r.setName, qNum: r.qNum, correct: 0, incorrect: 0 };
+                    if (r.score === 'correct') aggregated[key].correct++;
+                    else aggregated[key].incorrect++;
+                });
+                return Object.values(aggregated).sort((a, b) => b.incorrect - a.incorrect);
+            }, [history, filterSetName]);
+
+            // バツ問解き直し開始
+            const startRetestFromAnalysis = () => {
+                if (!filterSetName) return alert('まず問題セット名でフィルターしてください');
+                const wrongOnes = filteredData.filter(d => d.incorrect > 0).map(d => d.qNum);
+                if (wrongOnes.length === 0) return alert('このセットに「×」の記録はありません');
+                startTest(filterSetName, wrongOnes);
+            };
+
+            const qList = isRetesting ? retestQuestions : Array.from({ length: 100 }, (_, i) => i + 1);
+
+            return (
+                <div className="flex flex-col min-h-screen bg-slate-50">
+                    {/* Header */}
+                    <header className="bg-white border-b px-4 py-3 flex justify-between items-center sticky top-0 z-30 shadow-sm">
+                        <h1 className="font-black text-xl text-slate-800 flex items-center gap-2">
+                            <Icon name="CheckCircle" className="text-blue-600" size={28} />
+                            <span>{view === 'test' ? setName : 'StudyRecord'}</span>
+                        </h1>
+                        <div className="flex gap-2">
+                            <button onClick={() => setView('setup')} className={`p-2 rounded-lg ${view !== 'analysis' ? 'bg-blue-100 text-blue-700' : 'text-slate-400'}`}><Icon name="Edit3" /></button>
+                            <button onClick={() => setView('analysis')} className={`p-2 rounded-lg ${view === 'analysis' ? 'bg-blue-100 text-blue-700' : 'text-slate-400'}`}><Icon name="BarChart2" /></button>
+                        </div>
+                    </header>
+
+                    <main className="flex-1 p-4 max-w-4xl mx-auto w-full">
+                        {view === 'setup' && (
+                            <div className="mt-10 bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
+                                <h2 className="text-2xl font-bold mb-6">新規テスト開始</h2>
+                                <input 
+                                    type="text" value={setName} onChange={e => setSetName(e.target.value)}
+                                    placeholder="問題セット名 (例: 3-20)"
+                                    className="w-full p-5 text-xl border-2 rounded-2xl mb-6 outline-none focus:border-blue-500 transition-all"
+                                />
+                                <button onClick={() => startTest(setName)} className="w-full bg-blue-600 text-white font-bold py-5 rounded-2xl text-xl shadow-lg active:scale-95 transition-transform">
+                                    100問スタート
+                                </button>
+                            </div>
+                        )}
+
+                        {view === 'test' && (
+                            <div className="pb-32">
+                                <div className="space-y-6">
+                                    {qList.map(num => (
+                                        <div key={num} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
+                                            <div className="flex justify-between items-center mb-4">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="bg-slate-800 text-white w-10 h-10 flex items-center justify-center rounded-full font-bold">
+                                                        {num}
+                                                    </span>
+                                                    {correctAnswers[`${setName}-${num}`] && (
+                                                        <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded">
+                                                            正解: {correctAnswers[`${setName}-${num}`]}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                {/* 右端のマルバツ */}
+                                                <div className="flex gap-2">
+                                                    <button 
+                                                        onClick={() => handleScore(num, 'correct')}
+                                                        className={`w-12 h-12 rounded-full border-2 font-bold transition-all ${scores[num] === 'correct' ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200 text-slate-300'}`}
+                                                    >○</button>
+                                                    <button 
+                                                        onClick={() => handleScore(num, 'incorrect')}
+                                                        className={`w-12 h-12 rounded-full border-2 font-bold transition-all ${scores[num] === 'incorrect' ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-200 text-slate-300'}`}
+                                                    >×</button>
+                                                </div>
+                                            </div>
+
+                                            {/* 大きな1-4ボタン */}
+                                            <div className="flex gap-2 mb-3">
+                                                {[1, 2, 3, 4].map(v => (
+                                                    <button 
+                                                        key={v}
+                                                        onClick={() => handleAnswerSelect(num, v)}
+                                                        className={`answer-btn rounded-xl border-2 transition-all ${answers[num] === v ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600'}`}
+                                                    >{v}</button>
+                                                ))}
+                                            </div>
+
+                                            <input 
+                                                type="text"
+                                                placeholder="簡易メモ..."
+                                                value={notes[num] || ''}
+                                                onChange={e => setNotes({...notes, [num]: e.target.value})}
+                                                className="w-full bg-slate-50 p-2 rounded-lg text-sm border border-transparent focus:bg-white focus:border-slate-200 outline-none"
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t">
+                                    <div className="max-w-4xl mx-auto flex gap-4">
+                                        <button onClick={() => setView('setup')} className="flex-1 bg-slate-200 text-slate-700 font-bold py-4 rounded-xl">中断</button>
+                                        <button onClick={finishTest} className="flex-[2] bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-lg">記録して終了</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {view === 'analysis' && (
+                            <div className="space-y-4">
+                                <div className="bg-white p-4 rounded-2xl shadow-sm border space-y-4">
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">セット名でフィルタ</label>
+                                        <input 
+                                            type="text" value={filterSetName} onChange={e => setFilterSetName(e.target.value)}
+                                            placeholder="例: 3-20"
+                                            className="w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
+                                    {filterSetName && (
+                                        <button 
+                                            onClick={startRetestFromAnalysis}
+                                            className="w-full bg-rose-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2"
+                                        >
+                                            <Icon name="RefreshCw" size={18} />
+                                            このセットの「×」問題を解く
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+                                    <table className="w-full">
+                                        <thead className="bg-slate-50 text-slate-500 text-xs font-bold">
+                                            <tr>
+                                                <th className="p-4 text-left">問題集</th>
+                                                <th className="p-4 text-left">設問</th>
+                                                <th className="p-4 text-center">×</th>
+                                                <th className="p-4 text-center">○</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {filteredData.map((item, idx) => (
+                                                <tr key={idx} className="hover:bg-slate-50">
+                                                    <td className="p-4 font-medium text-slate-500">{item.setName}</td>
+                                                    <td className="p-4 font-black text-lg">{item.qNum}</td>
+                                                    <td className="p-4 text-center">
+                                                        <span className="inline-block px-3 py-1 rounded-full bg-rose-100 text-rose-600 font-bold">{item.incorrect}</span>
+                                                    </td>
+                                                    <td className="p-4 text-center">
+                                                        <span className="inline-block px-3 py-1 rounded-full bg-emerald-100 text-emerald-600 font-bold">{item.correct}</span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {filteredData.length === 0 && (
+                                                <tr><td colSpan="4" className="p-10 text-center text-slate-400">データがありません</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
