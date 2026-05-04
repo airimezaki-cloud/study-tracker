@@ -455,7 +455,7 @@
                                             onClick={() => {
                                                 const wrongOnes = filteredData.map(d => d.qNum);
                                                 if (wrongOnes.length === 0) {
-                                                    setModalMsg('このセットに「×」の記録はありません🎉');
+                                                    setModalMsg('この回に「×」の記録はありません🎉');
                                                     return;
                                                 }
                                                 startTest(filterSetName, wrongOnes);
@@ -471,7 +471,7 @@
                                 <div className="bg-white rounded-3xl border shadow-sm overflow-hidden mb-10">
                                     <div className="p-5 border-b bg-slate-50">
                                         <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                            <Icon name="AlertCircle" className="text-rose-500" size={20} />「‪✕‬」一覧
+                                            <Icon name="AlertCircle" className="text-rose-500" size={20} />「×」一覧
                                         </h3>
                                     </div>
                                     <div className="overflow-x-auto">
