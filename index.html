@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
-    <title>学習記録アプリ v3.1</title>
+    <title>学習記録アプリ</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -276,7 +276,7 @@
                             <div className="space-y-6 mt-4">
                                 <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
                                     <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-                                        <Icon name="PlusCircle" className="text-blue-500" /> 新規開拓テスト
+                                        <Icon name="PlusCircle" className="text-blue-500" /> テストを開始する
                                     </h2>
                                     <p className="text-xs text-slate-500 mb-4">※過去に解いたセットは下の履歴から「リトライ」してください</p>
                                     <input 
@@ -463,7 +463,7 @@
                                             className="w-full bg-rose-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform"
                                         >
                                             <Icon name="Target" size={20} />
-                                            このセットの「×」問題を集中特訓
+                                            この回の「×」問題のみリトライ
                                         </button>
                                     )}
                                 </div>
@@ -471,14 +471,14 @@
                                 <div className="bg-white rounded-3xl border shadow-sm overflow-hidden mb-10">
                                     <div className="p-5 border-b bg-slate-50">
                                         <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                            <Icon name="AlertCircle" className="text-rose-500" size={20} /> 弱点リスト（累計）
+                                            <Icon name="AlertCircle" className="text-rose-500" size={20} />「‪✕‬」一覧
                                         </h3>
                                     </div>
                                     <div className="overflow-x-auto">
                                         <table className="w-full">
                                             <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase">
                                                 <tr>
-                                                    <th className="p-4 text-left whitespace-nowrap">セット</th>
+                                                    <th className="p-4 text-left whitespace-nowrap">回</th>
                                                     <th className="p-4 text-left">設問</th>
                                                     <th className="p-4 text-center">正解</th>
                                                     <th className="p-4 text-center">累計×</th>
